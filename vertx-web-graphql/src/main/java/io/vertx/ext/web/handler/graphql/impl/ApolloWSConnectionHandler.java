@@ -18,6 +18,7 @@ package io.vertx.ext.web.handler.graphql.impl;
 
 import graphql.ExecutionInput;
 import graphql.ExecutionResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.ServerWebSocket;
@@ -57,6 +58,7 @@ class ApolloWSConnectionHandler {
   private final ContextInternal context;
   private final Executor executor;
   private final ConcurrentMap<String, Subscription> subscriptions;
+  private final AtomicReference<Future<Object>> atomicFuture;
 
   ApolloWSConnectionHandler(ApolloWSHandlerImpl apolloWSHandler, ContextInternal context, ServerWebSocket serverWebSocket) {
     this.apolloWSHandler = apolloWSHandler;
@@ -64,6 +66,7 @@ class ApolloWSConnectionHandler {
     this.serverWebSocket = serverWebSocket;
     this.executor = task -> context.runOnContext(v -> task.run());
     subscriptions = new ConcurrentHashMap<>();
+    atomicFuture = new AtomicReference<>(Future.succeededFuture(null));
   }
 
   void handleConnection() {
@@ -94,30 +97,43 @@ class ApolloWSConnectionHandler {
       return;
     }
 
-    ApolloWSMessage message = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject);
+    ApolloWSMessage message = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject, null);
 
     Handler<ApolloWSMessage> mh = apolloWSHandler.getMessageHandler();
     if (mh != null) {
       mh.handle(message);
     }
 
-    switch (type) {
-      case CONNECTION_INIT:
-        connect();
-        break;
-      case CONNECTION_TERMINATE:
-        serverWebSocket.close();
-        break;
-      case START:
-        start(message);
-        break;
-      case STOP:
-        stop(opId);
-        break;
-      default:
-        sendMessage(opId, ERROR, "Unsupported message type: " + type);
-        break;
+    if (message.future() != null) {
+      this.atomicFuture.set(message.future());
+    } else if (type.equals(CONNECTION_INIT)) {
+      this.atomicFuture.set(Future.succeededFuture(jsonObject.getJsonObject("payload")));
     }
+
+    this.atomicFuture.get().onComplete(ar -> {
+      if (ar.succeeded()) {
+        ApolloWSMessage messageWithParams = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject, ar.result());
+        switch (type) {
+          case CONNECTION_INIT:
+            connect();
+            break;
+          case CONNECTION_TERMINATE:
+            serverWebSocket.close();
+            break;
+          case START:
+            start(messageWithParams);
+            break;
+          case STOP:
+            stop(opId);
+            break;
+          default:
+            sendMessage(opId, ERROR, "Unsupported message type: " + type);
+            break;
+        }
+      } else {
+        sendMessage(opId, ERROR, ar.cause().getMessage());
+      }
+    });
   }
 
   private void connect() {

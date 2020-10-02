@@ -17,11 +17,12 @@
 package io.vertx.ext.web.handler.graphql;
 
 import io.vertx.codegen.annotations.VertxGen;
+import io.vertx.core.Future;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.json.JsonObject;
 
 /**
- * A message recevied over Apollo's {@code subscriptions-transport-ws} transport.
+ * A message received over Apollo's {@code subscriptions-transport-ws} transport.
  *
  * @author Rogelio Orts
  */
@@ -43,4 +44,21 @@ public interface ApolloWSMessage {
    */
   JsonObject content();
 
+  /**
+   * @return the connection params
+   */
+  Object connectionParams();
+
+  /**
+   * Apollo handler will reply to user only when provided future completes.
+   * Handshake can only be set for message of type {@link ApolloWSMessageType#CONNECTION_INIT}.
+   * Resulting {@link Object} will be available using {@link ApolloWSMessage#connectionParams()} method
+   * on all subsequent messages of type {@link ApolloWSMessageType#START}.
+   */
+  void setHandshake(Future<Object> future);
+
+  /**
+   * @return the future set by {@link ApolloWSMessage#setHandshake(Future)}
+   */
+  Future<Object> future();
 }
