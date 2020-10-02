@@ -104,14 +104,13 @@ class ApolloWSConnectionHandler {
       mh.handle(message);
     }
 
-    if (message.future() != null) {
-      this.futureRef.set(message.future());
-    } else if (type.equals(CONNECTION_INIT)) {
-      this.futureRef.set(Future.succeededFuture(null));
-    }
-
     switch (type) {
       case CONNECTION_INIT:
+        if (message.future() != null) {
+          this.futureRef.set(message.future());
+        } else {
+          this.futureRef.set(Future.succeededFuture(null));
+        }
         this.futureRef.get().onComplete(ar -> {
           if (ar.succeeded()) {
             connect();
