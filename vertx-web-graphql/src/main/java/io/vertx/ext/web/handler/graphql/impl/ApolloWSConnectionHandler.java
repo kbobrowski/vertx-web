@@ -58,7 +58,7 @@ class ApolloWSConnectionHandler {
   private final ContextInternal context;
   private final Executor executor;
   private final ConcurrentMap<String, Subscription> subscriptions;
-  private final AtomicReference<Future<Object>> atomicFuture;
+  private final AtomicReference<Future<Object>> futureRef;
 
   ApolloWSConnectionHandler(ApolloWSHandlerImpl apolloWSHandler, ContextInternal context, ServerWebSocket serverWebSocket) {
     this.apolloWSHandler = apolloWSHandler;
@@ -66,7 +66,7 @@ class ApolloWSConnectionHandler {
     this.serverWebSocket = serverWebSocket;
     this.executor = task -> context.runOnContext(v -> task.run());
     subscriptions = new ConcurrentHashMap<>();
-    atomicFuture = new AtomicReference<>(Future.succeededFuture(null));
+    futureRef = new AtomicReference<>(Future.succeededFuture(null));
   }
 
   void handleConnection() {
@@ -105,27 +105,29 @@ class ApolloWSConnectionHandler {
     }
 
     if (message.future() != null) {
-      this.atomicFuture.set(message.future());
+      this.futureRef.set(message.future());
     } else if (type.equals(CONNECTION_INIT)) {
-      this.atomicFuture.set(Future.succeededFuture(jsonObject.getJsonObject("payload")));
+      this.futureRef.set(Future.succeededFuture(jsonObject.getJsonObject("payload")));
     }
 
     switch (type) {
       case CONNECTION_INIT:
-        this.atomicFuture.get().onComplete(ar -> {
+        this.futureRef.get().onComplete(ar -> {
           if (ar.succeeded()) {
             connect();
           } else {
             sendMessage(opId, CONNECTION_ERROR, ar.cause().getMessage());
             context.setTimer(10, timeout -> serverWebSocket.close((short)1011));
+            this.futureRef.set(Future.succeededFuture(null));
           }
         });
         break;
       case CONNECTION_TERMINATE:
         serverWebSocket.close();
+        this.futureRef.set(Future.succeededFuture(null));
         break;
       case START:
-        this.atomicFuture.get().onComplete(ar -> {
+        this.futureRef.get().onComplete(ar -> {
           if (ar.succeeded()) {
             ApolloWSMessage messageWithParams = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject, ar.result());
             start(messageWithParams);

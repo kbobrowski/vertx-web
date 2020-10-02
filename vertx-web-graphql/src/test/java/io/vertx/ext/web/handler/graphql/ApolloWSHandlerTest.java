@@ -25,6 +25,7 @@ import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
+import io.vertx.core.Promise;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.WebSocket;
@@ -49,6 +50,10 @@ import java.util.stream.IntStream;
 import static graphql.schema.idl.RuntimeWiring.newRuntimeWiring;
 import static io.vertx.core.http.HttpMethod.GET;
 import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.COMPLETE;
+import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.CONNECTION_ACK;
+import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.CONNECTION_ERROR;
+import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.CONNECTION_INIT;
+import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.CONNECTION_KEEP_ALIVE;
 import static io.vertx.ext.web.handler.graphql.ApolloWSMessageType.DATA;
 
 /**
@@ -59,14 +64,25 @@ public class ApolloWSHandlerTest extends WebTestBase {
   private static final int MAX_COUNT = 4;
   private static final int STATIC_COUNT = 5;
 
-  private ApolloWSOptions apolloWSOptions = new ApolloWSOptions();
-  private AtomicReference<Subscription> subscriptionRef = new AtomicReference<>();
+  private final ApolloWSOptions apolloWSOptions = new ApolloWSOptions();
+  private final AtomicReference<Subscription> subscriptionRef = new AtomicReference<>();
 
   @Override
   public void setUp() throws Exception {
     super.setUp();
     GraphQL graphQL = graphQL();
-    router.route("/graphql").handler(ApolloWSHandler.create(graphQL, apolloWSOptions));
+    router.route("/graphql").handler(ApolloWSHandler.create(graphQL, apolloWSOptions).messageHandler(message -> {
+      if (message.type().equals(CONNECTION_INIT)) {
+        Promise<Object> promise = Promise.promise();
+        message.setHandshake(promise.future());
+        JsonObject payload = message.content().getJsonObject("payload");
+        if (payload != null && payload.containsKey("rejectMessage")) {
+          promise.fail(payload.getString("rejectMessage"));
+          return;
+        }
+        promise.complete(payload);
+      }
+    }));
     router.route("/graphql").handler(GraphQLHandler.create(graphQL));
   }
 
@@ -97,6 +113,10 @@ public class ApolloWSHandlerTest extends WebTestBase {
 
   private Publisher<Map<String, Object>> getCounter(DataFetchingEnvironment env) {
     boolean finite = env.getArgument("finite");
+    ApolloWSMessage message = env.getContext();
+    JsonObject connectionParams = message.connectionParams() == null
+      ? new JsonObject()
+      : (JsonObject) message.connectionParams();
     return subscriber -> {
       Subscription subscription = new Subscription() {
         @Override
@@ -114,11 +134,17 @@ public class ApolloWSHandlerTest extends WebTestBase {
         fail();
       }
       subscriber.onSubscribe(subscription);
-      IntStream.range(0, 5).forEach(num -> {
+      if (connectionParams.containsKey("count")) {
         Map<String, Object> counter = new HashMap<>();
-        counter.put("count", num);
+        counter.put("count", connectionParams.getInteger("count"));
         subscriber.onNext(counter);
-      });
+      } else {
+        IntStream.range(0, 5).forEach(num -> {
+          Map<String, Object> counter = new HashMap<>();
+          counter.put("count", num);
+          subscriber.onNext(counter);
+        });
+      }
       if (finite) {
         subscriber.onComplete();
         if (!subscriptionRef.compareAndSet(subscription, null)) {
@@ -165,6 +191,78 @@ public class ApolloWSHandlerTest extends WebTestBase {
         .put("type", "start")
         .put("id", "1");
       websocket.write(message.toBuffer());
+    }));
+    await();
+  }
+
+  @Test
+  public void testSubscriptionWsCallWithConnectionParams() {
+    int countInConnectionParams = 2;
+
+    client.webSocket("/graphql", onSuccess(websocket -> {
+      websocket.exceptionHandler(this::fail);
+      websocket.endHandler(v -> testComplete());
+
+      AtomicInteger counter = new AtomicInteger();
+
+      websocket.textMessageHandler(text -> {
+        JsonObject obj = new JsonObject(text);
+        ApolloWSMessageType type = ApolloWSMessageType.from(obj.getString("type"));
+        if (type.equals(CONNECTION_KEEP_ALIVE)) {
+          return;
+        }
+        int current = counter.getAndIncrement();
+        if (current == 0) {
+          assertEquals(CONNECTION_ACK, type);
+        } else if (current == 1) {
+          assertEquals(DATA, type);
+          int val = obj.getJsonObject("payload").getJsonObject("data").getJsonObject("counter").getInteger("count");
+          assertEquals(countInConnectionParams, val);
+          websocket.close();
+        }
+      });
+
+      JsonObject messageInit = new JsonObject()
+        .put("payload", new JsonObject()
+          .put("count", countInConnectionParams))
+        .put("type", "connection_init")
+        .put("id", "1");
+
+      JsonObject message = new JsonObject()
+        .put("payload", new JsonObject()
+          .put("query", "subscription Subscription { counter { count } }"))
+        .put("type", "start")
+        .put("id", "1");
+
+      websocket.write(messageInit.toBuffer());
+      websocket.write(message.toBuffer());
+    }));
+    await();
+  }
+
+  @Test
+  public void testSubscriptionWsCallWithFailedPromise() {
+    String rejectMessage = "test";
+
+    client.webSocket("/graphql", onSuccess(websocket -> {
+      websocket.exceptionHandler(this::fail);
+      websocket.endHandler(v -> testComplete());
+
+      websocket.textMessageHandler(text -> {
+        JsonObject obj = new JsonObject(text);
+        ApolloWSMessageType type = ApolloWSMessageType.from(obj.getString("type"));
+        assertEquals(CONNECTION_ERROR, type);
+        assertEquals(rejectMessage, obj.getString("payload"));
+        websocket.close();
+      });
+
+      JsonObject messageInit = new JsonObject()
+        .put("payload", new JsonObject()
+          .put("rejectMessage", rejectMessage))
+        .put("type", "connection_init")
+        .put("id", "1");
+
+      websocket.write(messageInit.toBuffer());
     }));
     await();
   }

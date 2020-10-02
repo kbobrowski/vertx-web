@@ -24,7 +24,6 @@ import graphql.schema.idl.SchemaGenerator;
 import graphql.schema.idl.SchemaParser;
 import graphql.schema.idl.TypeDefinitionRegistry;
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerOptions;
@@ -66,7 +65,7 @@ public class ApolloTestsServer extends AbstractVerticle {
         Promise<Object> promise = Promise.promise();
         message.setHandshake(promise.future());
         JsonObject payload = message.content().getJsonObject("payload");
-        if (payload.containsKey("rejectMessage")) {
+        if (payload != null && payload.containsKey("rejectMessage")) {
           promise.fail(payload.getString("rejectMessage"));
           return;
         }
@@ -149,14 +148,11 @@ public class ApolloTestsServer extends AbstractVerticle {
   private Publisher<Object> counter(DataFetchingEnvironment env) {
     return subscriber -> {
       ApolloWSMessage message = env.getContext();
-      JsonObject connectionParams = (JsonObject) message.connectionParams();
+      JsonObject connectionParams = message.connectionParams() == null
+        ? new JsonObject()
+        : (JsonObject) message.connectionParams();
       Map<String, Object> counter = new HashMap<>();
-
-      if (connectionParams.containsKey("count")) {
-        counter.put("count", connectionParams.getInteger("count"));
-      } else {
-        counter.put("count", 1);
-      }
+      counter.put("count", connectionParams.getInteger("count", 1));
 
       subscriber.onNext(counter);
       subscriber.onComplete();
