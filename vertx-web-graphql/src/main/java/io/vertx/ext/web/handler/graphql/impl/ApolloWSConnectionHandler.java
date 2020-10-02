@@ -107,7 +107,7 @@ class ApolloWSConnectionHandler {
     if (message.future() != null) {
       this.futureRef.set(message.future());
     } else if (type.equals(CONNECTION_INIT)) {
-      this.futureRef.set(Future.succeededFuture(jsonObject.getJsonObject("payload")));
+      this.futureRef.set(Future.succeededFuture(null));
     }
 
     switch (type) {
