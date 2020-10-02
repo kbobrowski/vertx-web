@@ -110,30 +110,38 @@ class ApolloWSConnectionHandler {
       this.atomicFuture.set(Future.succeededFuture(jsonObject.getJsonObject("payload")));
     }
 
-    this.atomicFuture.get().onComplete(ar -> {
-      if (ar.succeeded()) {
-        ApolloWSMessage messageWithParams = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject, ar.result());
-        switch (type) {
-          case CONNECTION_INIT:
+    switch (type) {
+      case CONNECTION_INIT:
+        this.atomicFuture.get().onComplete(ar -> {
+          if (ar.succeeded()) {
             connect();
-            break;
-          case CONNECTION_TERMINATE:
-            serverWebSocket.close();
-            break;
-          case START:
+          } else {
+            sendMessage(opId, CONNECTION_ERROR, ar.cause().getMessage());
+            context.setTimer(10, timeout -> serverWebSocket.close((short)1011));
+          }
+        });
+        break;
+      case CONNECTION_TERMINATE:
+        serverWebSocket.close();
+        break;
+      case START:
+        this.atomicFuture.get().onComplete(ar -> {
+          if (ar.succeeded()) {
+            ApolloWSMessage messageWithParams = new ApolloWSMessageImpl(serverWebSocket, type, jsonObject, ar.result());
             start(messageWithParams);
-            break;
-          case STOP:
+          } else {
+            sendMessage(opId, ERROR, ar.cause().getMessage());
             stop(opId);
-            break;
-          default:
-            sendMessage(opId, ERROR, "Unsupported message type: " + type);
-            break;
-        }
-      } else {
-        sendMessage(opId, ERROR, ar.cause().getMessage());
-      }
-    });
+          }
+        });
+        break;
+      case STOP:
+        stop(opId);
+        break;
+      default:
+        sendMessage(opId, ERROR, "Unsupported message type: " + type);
+        break;
+    }
   }
 
   private void connect() {

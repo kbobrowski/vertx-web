@@ -109,7 +109,11 @@ test('ws link subscription', () => {
 });
 
 test('ws link subscription with connection params', () => {
-  const client = new SubscriptionClient(wsUri, {connectionParams: {count: 2}});
+  const client = new SubscriptionClient(wsUri, {
+    connectionParams: {
+      count: 2
+    }
+  });
   const link = new WebSocketLink(client);
 
   return new Promise((resolve, reject) => {
@@ -122,6 +126,20 @@ test('ws link subscription with connection params', () => {
 
         resolve();
       });
+  });
+});
+
+test('ws link subscription with failed promise', () => {
+  return new Promise((resolve, reject) => {
+    new SubscriptionClient(wsUri, {
+      connectionParams: {
+        rejectMessage: "test"
+      },
+      connectionCallback: error => {
+        expect(error).toEqual("test");
+        resolve()
+      }
+    });
   });
 });
 
