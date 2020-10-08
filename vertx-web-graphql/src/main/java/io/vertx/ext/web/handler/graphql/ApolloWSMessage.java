@@ -47,7 +47,7 @@ public interface ApolloWSMessage {
   /**
    * @return the connection params
    */
-  Object connectionParams();
+  <T> T connectionParams();
 
   /**
    * Apollo handler will reply to user only when provided future completes.
@@ -55,10 +55,10 @@ public interface ApolloWSMessage {
    * Resulting {@link Object} will be available using {@link ApolloWSMessage#connectionParams()} method
    * on all subsequent messages of type {@link ApolloWSMessageType#START}.
    */
-  void setHandshake(Future<Object> future);
+  <T> void setHandshake(Future<T> future);
 
   /**
    * @return the future set by {@link ApolloWSMessage#setHandshake(Future)}
    */
-  Future<Object> future();
+  <T> Future<T> future();
 }

@@ -56,22 +56,22 @@ public class ApolloWSMessageImpl implements ApolloWSMessage {
   }
 
   @Override
-  public Object connectionParams() {
-    return connectionParams;
+  public <T> T connectionParams() {
+    return (T) connectionParams;
   }
 
   @Override
-  public void setHandshake(Future<Object> future) {
+  public <T> void setHandshake(Future<T> future) {
     if (type != ApolloWSMessageType.CONNECTION_INIT) {
       throw new IllegalStateException("setHandshake method can only be used on a message of type CONNECTION_INIT");
     }
     synchronized (this) {
-      this.future = future;
+      this.future = (Future<Object>) future;
     }
   }
 
   @Override
-  public synchronized Future<Object> future() {
-    return future;
+  public synchronized <T> Future<T> future() {
+    return (Future<T>) future;
   }
 }
